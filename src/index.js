@@ -91,3 +91,12 @@ main().catch(err => {
   console.error('[BOT] Fatal error:', err);
   process.exit(1);
 });
+
+// ===== HTTP Health Check Server (for cloud hosting) =====
+const http = require('http');
+const PORT = process.env.PORT || 3000;
+const server = http.createServer((req, res) => {
+  res.writeHead(200, { 'Content-Type': 'application/json' });
+  res.end(JSON.stringify({ status: 'ok', uptime: process.uptime() }));
+});
+server.listen(PORT, () => console.log(`[HTTP] Health check on port ${PORT}`));
