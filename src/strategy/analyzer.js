@@ -51,6 +51,9 @@ class ChartPatternAnalyzer {
     // Determine overall trend from 15m candles
     const trend15m = this._getTrend(candles15m);
 
+    // Blocked strategies (backtest-proven losers)
+    const BLOCKED = ['double_bottom', 'sym_triangle_bull', 'inv_cup_handle'];
+
     // Try each pattern detector — return first strong signal
     const detectors = [
       () => this._detectDoubleTopBottom(recent, symbol),
@@ -66,7 +69,7 @@ class ChartPatternAnalyzer {
 
     for (const detect of detectors) {
       const signal = detect();
-      if (signal) return signal;
+      if (signal && !BLOCKED.includes(signal.strategy)) return signal;
     }
 
     return null;
