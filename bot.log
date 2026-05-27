@@ -1,0 +1,59 @@
+◇ injected env (5) from .env // tip: ⌘ suppress logs { quiet: true }
+==================================================
+  DERIV OTC BOT v2.0 — Synthetic Indices
+  Symbols: R_75, R_25, R_100, R_50, R_10
+  Duration: 5 minutes | Timeframes: 5m + 15m
+==================================================
+[DERIV] WebSocket connected
+[DERIV] msg #1: authorize
+[DERIV] Authorized: VRTC11240175 | Balance: $10012.59
+[ENGINE] Started with 5 symbols
+[ENGINE] Base stake: $1.20
+[DERIV] Subscribing to R_75 candles (5m + 15m)
+[DERIV] msg #2: transaction
+[DERIV] msg #3: balance
+[DERIV] msg #4: candles
+[DERIV] Loaded 200 5m candles for R_75
+[DERIV] msg #5: candles
+[DERIV] Loaded 200 15m candles for R_75
+[DERIV] Subscribing to R_25 candles (5m + 15m)
+[DERIV] msg #6: candles
+[DERIV] Loaded 200 15m candles for R_25
+[DERIV] msg #7: candles
+[DERIV] Loaded 200 5m candles for R_25
+[DERIV] Subscribing to R_100 candles (5m + 15m)
+[DERIV] msg #8: ohlc
+[DERIV] msg #9: ohlc
+[DERIV] msg #10: ohlc
+[DERIV] msg #11: ohlc
+[DERIV] msg #12: candles
+[DERIV] Loaded 200 5m candles for R_100
+[DERIV] msg #13: candles
+[DERIV] Loaded 200 15m candles for R_100
+[DERIV] Subscribing to R_50 candles (5m + 15m)
+[DERIV] msg #14: candles
+[DERIV] Loaded 200 5m candles for R_50
+[DERIV] msg #15: candles
+[DERIV] Loaded 200 15m candles for R_50
+[DERIV] Subscribing to R_10 candles (5m + 15m)
+[DERIV] msg #16: ohlc
+[DERIV] msg #17: ohlc
+[DERIV] msg #18: ohlc
+[DERIV] msg #19: ohlc
+[DERIV] msg #20: ohlc
+[DERIV] msg #21: ohlc
+[DERIV] msg #22: ohlc
+[DERIV] msg #23: ohlc
+[DERIV] msg #24: candles
+[DERIV] Loaded 200 5m candles for R_10
+[DERIV] msg #25: candles
+[DERIV] Loaded 200 15m candles for R_10
+
+[BOT] Ready! Waiting for signals on 5min candle closes...
+
+[DERIV] msg #26: ohlc
+[DERIV] msg #27: ohlc
+[DERIV] msg #28: ohlc
+[DERIV] msg #29: ohlc
+[DERIV] msg #30: ohlc
+[DERIV] msg #100: ohlc

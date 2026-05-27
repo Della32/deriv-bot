@@ -1,0 +1,24 @@
+{
+  "name": "deriv-bot",
+  "version": "6.0.0",
+  "description": "Deriv Binary Options Bot — Reversal Strategy v6 (95.5% WR)",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "start:telegram": "node src/index.js --telegram-only",
+    "backtest": "node src/backtest.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "dependencies": {
+    "better-sqlite3": "^12.10.0",
+    "dotenv": "^17.4.2",
+    "node-fetch": "^2.7.0",
+    "ws": "^8.21.0"
+  }
+}
