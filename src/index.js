@@ -100,3 +100,17 @@ const server = http.createServer((req, res) => {
   res.end(JSON.stringify({ status: 'ok', uptime: process.uptime() }));
 });
 server.listen(PORT, () => console.log(`[HTTP] Health check on port ${PORT}`));
+
+// ===== Self-ping to prevent Render free tier sleep =====
+const RENDER_URL = process.env.RENDER_EXTERNAL_URL || process.env.RENDER_SERVICE_URL;
+if (RENDER_URL) {
+  setInterval(() => {
+    require('http').get(RENDER_URL, () => {}).on('error', () => {});
+    console.log('[PING] Self-ping to stay awake');
+  }, 10 * 60 * 1000); // Every 10 minutes
+} else {
+  // Fallback: ping localhost
+  setInterval(() => {
+    require('http').get(`http://localhost:${process.env.PORT || 3000}`, () => {}).on('error', () => {});
+  }, 10 * 60 * 1000);
+}
