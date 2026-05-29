@@ -2,6 +2,7 @@
  * Martingale Progression — shared across all symbols
  * Each loss bumps stake to recover losses + profit
  * Factor: 2.2x (covers 92% payout recovery)
+ * v2.1 — SQLite persistence: survives restarts
  */
 
 class Progression {
@@ -43,6 +44,32 @@ class Progression {
       nextStake: this.getNextStake(),
       maxLevel: this.maxLevel
     };
+  }
+
+  // ===== PERSISTENCE =====
+
+  /**
+   * Serialize state to a JSON-safe object
+   */
+  toJSON() {
+    return {
+      currentLevel: this.currentLevel,
+      totalLost: this.totalLost,
+      baseStake: this.baseStake,
+      maxLevel: this.maxLevel
+    };
+  }
+
+  /**
+   * Restore state from a parsed JSON object
+   */
+  fromJSON(data) {
+    if (!data) return;
+    if (typeof data.currentLevel === 'number') this.currentLevel = data.currentLevel;
+    if (typeof data.totalLost === 'number') this.totalLost = data.totalLost;
+    if (typeof data.baseStake === 'number') this.baseStake = data.baseStake;
+    if (typeof data.maxLevel === 'number') this.maxLevel = data.maxLevel;
+    console.log(`[PROG] Restored: Level ${this.currentLevel}, totalLost $${this.totalLost.toFixed(2)}, next stake $${this.getNextStake().toFixed(2)}`);
   }
 }
 

@@ -1,7 +1,7 @@
 /**
- * Deriv WebSocket Service v2.2 — OTC Synthetics
+ * Deriv WebSocket Service v2.3 — OTC Synthetics
  * Handles: auth, candle subscriptions (5min + 15min), trade execution
- * Fixes: robust contract result detection, POC polling fallback
+ * v2.3 — Unlimited reconnects for Render restarts, exponential backoff
  */
 
 const WebSocket = require('ws');
@@ -17,9 +17,13 @@ class DerivService extends EventEmitter {
     this.balance = 0;
     this.accountId = '';
     this.currency = 'USD';
+
+    // Reconnection — never give up
     this.reconnectDelay = 3000;
-    this.maxReconnects = 10;
+    this.maxReconnectDelay = 60000; // cap at 60s
     this.reconnectCount = 0;
+    this._reconnecting = false;
+
     this.subscriptions = {};
     this.pendingBuy = null;
 
@@ -34,6 +38,9 @@ class DerivService extends EventEmitter {
 
     // Candle storage: { symbol: { '5m': [...], '15m': [...] } }
     this.candles = {};
+
+    // Heartbeat / keepalive
+    this._pingInterval = null;
   }
 
   _reqId(symbol, tf) {
@@ -45,11 +52,21 @@ class DerivService extends EventEmitter {
   connect() {
     return new Promise((resolve, reject) => {
       const url = `wss://ws.derivws.com/websockets/v3?app_id=${this.appId}`;
-      this.ws = new WebSocket(url);
+
+      try {
+        this.ws = new WebSocket(url);
+      } catch (e) {
+        console.error('[DERIV] WebSocket creation failed:', e.message);
+        reject(e);
+        return;
+      }
 
       this.ws.on('open', () => {
         console.log('[DERIV] WebSocket connected');
         this.ws.send(JSON.stringify({ authorize: this.token }));
+
+        // Start heartbeat — send ping every 30s to keep WS alive
+        this._startHeartbeat();
       });
 
       this._msgCount = 0;
@@ -67,23 +84,45 @@ class DerivService extends EventEmitter {
         }
       });
 
-      this.ws.on('close', () => {
-        console.log('[DERIV] WebSocket closed');
+      this.ws.on('close', (code, reason) => {
+        console.log(`[DERIV] WebSocket closed (code=${code}, reason=${reason || 'none'})`);
         this.authorized = false;
+        this._stopHeartbeat();
         this._stopPocPolling();
         this._reconnect();
       });
 
       this.ws.on('error', (err) => {
         console.error('[DERIV] WebSocket error:', err.message);
-        reject(err);
+        // Don't reject on reconnect attempts
+        if (this.reconnectCount === 0) {
+          reject(err);
+        }
       });
 
-      // Timeout
+      // Timeout for initial connection only
       setTimeout(() => {
-        if (!this.authorized) reject(new Error('Auth timeout'));
+        if (!this.authorized && this.reconnectCount === 0) {
+          reject(new Error('Auth timeout'));
+        }
       }, 15000);
     });
+  }
+
+  _startHeartbeat() {
+    this._stopHeartbeat();
+    this._pingInterval = setInterval(() => {
+      if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+        this.ws.send(JSON.stringify({ ping: 1 }));
+      }
+    }, 30000);
+  }
+
+  _stopHeartbeat() {
+    if (this._pingInterval) {
+      clearInterval(this._pingInterval);
+      this._pingInterval = null;
+    }
   }
 
   _handleMessage(msg, resolveConnect) {
@@ -102,7 +141,9 @@ class DerivService extends EventEmitter {
         this.accountId = msg.authorize.loginid;
         this.currency = msg.authorize.currency;
         console.log(`[DERIV] Authorized: ${this.accountId} | Balance: $${this.balance}`);
+        // Reset reconnect counter on successful auth
         this.reconnectCount = 0;
+        this.reconnectDelay = 3000;
         this.ws.send(JSON.stringify({ balance: 1, subscribe: 1 }));
         this.ws.send(JSON.stringify({ transaction: 1, subscribe: 1 }));
         if (resolveConnect) resolveConnect();
@@ -138,6 +179,10 @@ class DerivService extends EventEmitter {
         if (msg.transaction) {
           this.emit('transaction', msg.transaction);
         }
+        break;
+
+      case 'ping':
+        // heartbeat response, ignore
         break;
 
       default:
@@ -209,9 +254,6 @@ class DerivService extends EventEmitter {
     const tf = gran === 300 ? '5m' : gran === 900 ? '15m' : null;
     if (!tf || !this.candles[symbol]) return;
 
-    // Deriv sends open_time = fixed start of the candle period
-    // epoch = current tick time (changes every tick)
-    // We use open_time as the candle identifier
     const openTime = parseInt(ohlc.open_time) || Math.floor(parseInt(ohlc.epoch) / gran) * gran;
 
     const candle = {
@@ -228,10 +270,8 @@ class DerivService extends EventEmitter {
     const lastOpenTime = last ? (last.openTime || Math.floor(last.epoch / gran) * gran) : null;
 
     if (last && lastOpenTime === openTime) {
-      // Same candle — just update OHLC values (tick within same candle)
       candles[candles.length - 1] = candle;
     } else {
-      // New candle period — previous candle is now complete/closed
       candles.push(candle);
       if (candles.length > 250) candles.shift();
 
@@ -296,11 +336,9 @@ class DerivService extends EventEmitter {
     const buy = msg.buy;
     console.log(`[DERIV] ✅ Trade executed: contract_id=${buy.contract_id}, payout=$${buy.payout}`);
 
-    // Track active contract
     this._activeContractId = buy.contract_id;
     this._resultEmitted = false;
 
-    // Subscribe to contract updates
     const pocReqId = this._nextReqId++;
     this.ws.send(JSON.stringify({
       proposal_open_contract: 1,
@@ -310,7 +348,6 @@ class DerivService extends EventEmitter {
     }));
     console.log(`[DERIV] Subscribed to contract ${buy.contract_id} updates`);
 
-    // Start polling as backup (every 30s, check if contract is settled)
     this._startPocPolling(buy.contract_id);
 
     if (this.pendingBuy) {
@@ -331,7 +368,6 @@ class DerivService extends EventEmitter {
     this._stopPocPolling();
     console.log(`[DERIV] Starting POC polling for contract ${contractId}`);
 
-    // Poll every 30 seconds
     this._pocPollInterval = setInterval(() => {
       if (this._resultEmitted) {
         this._stopPocPolling();
@@ -357,23 +393,19 @@ class DerivService extends EventEmitter {
     const contract = msg.proposal_open_contract;
     if (!contract) return;
 
-    // Prevent duplicate emissions
     if (this._resultEmitted && contract.contract_id == this._activeContractId) return;
 
     const isSold = contract.is_sold === 1 || contract.is_sold === true;
-    const status = contract.status; // 'open', 'won', 'lost'
+    const status = contract.status;
 
-    // Only accept FINAL result: is_sold=1 AND status is 'won' or 'lost'
-    // Don't trust is_expired alone - profit field is unreliable until is_sold=1
     if (isSold && (status === 'won' || status === 'lost')) {
       const won = status === 'won';
       const sellPrice = parseFloat(contract.sell_price) || 0;
       const buyPrice = parseFloat(contract.buy_price) || 0;
-      // Real profit = sell_price - buy_price
       const profit = sellPrice - buyPrice;
       const balAfter = contract.balance_after || this.balance;
 
-      console.log(`[DERIV] ${won ? '\u{1f7e2} WIN' : '\u{1f534} LOSS'}: profit=${profit.toFixed(2)}, sell=${sellPrice}, buy=${buyPrice}, balance=${balAfter}`);
+      console.log(`[DERIV] ${won ? '🟢 WIN' : '🔴 LOSS'}: profit=${profit.toFixed(2)}, sell=${sellPrice}, buy=${buyPrice}, balance=${balAfter}`);
       if (contract.balance_after) this.balance = contract.balance_after;
 
       this._resultEmitted = true;
@@ -391,37 +423,41 @@ class DerivService extends EventEmitter {
         symbol: contract.underlying
       });
 
-      // Forget subscription
       if (msg.subscription) {
         this.ws.send(JSON.stringify({ forget: msg.subscription.id }));
       }
     }
   }
 
-
-  // ============ RECONNECTION ============
+  // ============ RECONNECTION (never give up) ============
 
   _reconnect() {
-    if (this.reconnectCount >= this.maxReconnects) {
-      console.error('[DERIV] Max reconnects reached');
-      this.emit('disconnected');
-      return;
-    }
+    if (this._reconnecting) return;
+    this._reconnecting = true;
 
     this.reconnectCount++;
-    console.log(`[DERIV] Reconnecting in ${this.reconnectDelay / 1000}s (attempt ${this.reconnectCount})`);
+
+    // Exponential backoff with cap
+    const delay = Math.min(this.reconnectDelay * Math.pow(1.5, Math.min(this.reconnectCount - 1, 10)), this.maxReconnectDelay);
+
+    console.log(`[DERIV] Reconnecting in ${(delay / 1000).toFixed(1)}s (attempt #${this.reconnectCount})`);
 
     setTimeout(async () => {
+      this._reconnecting = false;
       try {
         await this.connect();
+        // Re-subscribe to all symbols
         for (const symbol of Object.keys(this.candles)) {
           await this.subscribeCandles(symbol);
+          await new Promise(r => setTimeout(r, 500));
         }
+        console.log(`[DERIV] Reconnected successfully after ${this.reconnectCount} attempt(s)`);
         this.emit('reconnected');
       } catch (e) {
         console.error('[DERIV] Reconnect failed:', e.message);
+        // Will retry via the close event handler
       }
-    }, this.reconnectDelay);
+    }, delay);
   }
 
   getBalance() { return this.balance; }

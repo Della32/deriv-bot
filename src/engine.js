@@ -1,8 +1,9 @@
 /**
- * Trading Engine v2.1 — OTC Synthetics
+ * Trading Engine v2.2 — OTC Synthetics
  * Automatic mode: analyze every 5min candle close, execute if signal found
  * Progression (martingale) shared across all symbols
  * Modern Telegram notifications with HTML + inline buttons
+ * v2.2 — SQLite state persistence for crash recovery
  */
 
 const ChartPatternAnalyzer = require('./strategy/analyzer');
@@ -45,7 +46,79 @@ class TradingEngine {
     this.MAX_DAILY_TRADES = 20;
     this.dailyTrades = 0;
     this.lastResetDay = new Date().toDateString();
+
+    // DB statements for state persistence
+    if (this.db) {
+      this._stmtGet = this.db.prepare('SELECT value FROM state WHERE key = ?');
+      this._stmtSet = this.db.prepare('INSERT OR REPLACE INTO state (key, value, updated_at) VALUES (?, ?, datetime("now"))');
+
+      // Restore state from DB
+      this._restoreState();
+    }
+
+    // Auto-save state every 60 seconds
+    this._saveInterval = setInterval(() => this.saveState(), 60000);
   }
+
+  // ===== STATE PERSISTENCE =====
+
+  _restoreState() {
+    try {
+      // Restore progression
+      const progData = this._stmtGet.get('progression');
+      if (progData) {
+        this.progression.fromJSON(JSON.parse(progData.value));
+      }
+
+      // Restore stats
+      const statsData = this._stmtGet.get('stats');
+      if (statsData) {
+        const s = JSON.parse(statsData.value);
+        this.stats.wins = s.wins || 0;
+        this.stats.losses = s.losses || 0;
+        this.stats.totalProfit = s.totalProfit || 0;
+        console.log(`[ENGINE] Stats restored: ${this.stats.wins}W/${this.stats.losses}L, P&L: $${this.stats.totalProfit.toFixed(2)}`);
+      }
+
+      // Restore daily trades count
+      const dailyData = this._stmtGet.get('daily_trades');
+      if (dailyData) {
+        const d = JSON.parse(dailyData.value);
+        if (d.day === new Date().toDateString()) {
+          this.dailyTrades = d.count || 0;
+          console.log(`[ENGINE] Daily trades restored: ${this.dailyTrades}`);
+        }
+      }
+
+      // Restore last trade times per symbol
+      const lttData = this._stmtGet.get('last_trade_times');
+      if (lttData) {
+        this.lastTradeTime = JSON.parse(lttData.value);
+        console.log(`[ENGINE] Last trade times restored for ${Object.keys(this.lastTradeTime).length} symbols`);
+      }
+
+      console.log('[ENGINE] State restored from database');
+    } catch (e) {
+      console.error('[ENGINE] State restore error (starting fresh):', e.message);
+    }
+  }
+
+  saveState() {
+    if (!this.db || !this._stmtSet) return;
+    try {
+      this._stmtSet.run('progression', JSON.stringify(this.progression.toJSON()));
+      this._stmtSet.run('stats', JSON.stringify(this.stats));
+      this._stmtSet.run('daily_trades', JSON.stringify({
+        day: new Date().toDateString(),
+        count: this.dailyTrades
+      }));
+      this._stmtSet.run('last_trade_times', JSON.stringify(this.lastTradeTime));
+    } catch (e) {
+      console.error('[ENGINE] State save error:', e.message);
+    }
+  }
+
+  // ===== HELPERS =====
 
   _name(symbol) {
     return SYMBOL_NAMES[symbol] || symbol;
@@ -71,6 +144,7 @@ class TradingEngine {
 
     console.log(`[ENGINE] Started with ${symbols.length} symbols`);
     console.log(`[ENGINE] Base stake: $${this.progression.getNextStake().toFixed(2)}`);
+    console.log(`[ENGINE] Progression level: ${this.progression.currentLevel}`);
 
     // Listen for candle closes
     this.deriv.on('candle_close', (data) => this._onCandleClose(data));
@@ -106,32 +180,14 @@ class TradingEngine {
       }
     });
 
-    // Startup notification
-    if (this.telegram) {
-      const symbolList = symbols.map(s => `  • ${this._name(s)}`).join('\n');
-      this.telegram.send(
-        `🤖 <b>Bot Iniciado</b>\n` +
-        `━━━━━━━━━━━━━━━━━━\n` +
-        `\n` +
-        `📊 <b>Ativos monitorados:</b>\n${symbolList}\n` +
-        `\n` +
-        `⏱ Timeframe: 5 minutos\n` +
-        `💰 Stake inicial: $${this.progression.getNextStake().toFixed(2)}\n` +
-        `🕐 Horário: ${this._time()}\n` +
-        `━━━━━━━━━━━━━━━━━━\n` +
-        `<i>Aguardando sinais...</i>`,
-        {
-          buttons: [
-            [{ text: '📊 Status', callback_data: 'status' }, { text: '⏸ Pausar', callback_data: 'pause' }]
-          ]
-        }
-      );
-    }
+    // NOTE: Startup Telegram message is now handled in index.js with dedup logic
   }
 
   stop() {
     this.running = false;
-    console.log('[ENGINE] Stopped');
+    this.saveState();
+    if (this._saveInterval) clearInterval(this._saveInterval);
+    console.log('[ENGINE] Stopped — state saved');
   }
 
   async _onCandleClose(data) {
@@ -215,6 +271,9 @@ class TradingEngine {
       this.lastTradeTime[signal.symbol] = Date.now();
       this.dailyTrades++;
 
+      // Save state immediately after trade
+      this.saveState();
+
       const dirEmoji = signal.direction === 'CALL' ? '🟢' : '🔴';
       const dirIcon = signal.direction === 'CALL' ? '📈' : '📉';
       const confPct = (signal.confidence * 100).toFixed(0);
@@ -287,6 +346,9 @@ class TradingEngine {
     }
     this.stats.totalProfit += result.profit;
 
+    // Save state immediately after result
+    this.saveState();
+
     const totalTrades = this.stats.wins + this.stats.losses;
     const wr = totalTrades > 0 ? (this.stats.wins / totalTrades * 100).toFixed(1) : '0.0';
     const nextStake = this.progression.getNextStake();
@@ -295,7 +357,7 @@ class TradingEngine {
     console.log(`[ENGINE] ${result.won ? '🟢 WIN' : '🔴 LOSS'} | Profit: $${result.profit} | Balance: $${result.balanceAfter}`);
     console.log(`[ENGINE] Stats: ${this._statsLine()} | P&L: $${this.stats.totalProfit.toFixed(2)}`);
 
-    // Save to DB
+    // Save to DB trades table
     if (this.db) {
       try {
         this.db.prepare(`
@@ -317,7 +379,6 @@ class TradingEngine {
       const plSign = this.stats.totalProfit >= 0 ? '+' : '';
 
       if (result.won) {
-        // WIN — edit original message
         const winMsg =
           `✅ <b>WIN</b>  •  ${trade.shortLabel}\n` +
           `━━━━━━━━━━━━━━━━━━\n` +
@@ -352,7 +413,6 @@ class TradingEngine {
           });
         }
       } else {
-        // LOSS — edit original message
         const lossMsg =
           `❌ <b>LOSS</b>  •  ${trade.shortLabel}\n` +
           `━━━━━━━━━━━━━━━━━━\n` +
@@ -394,6 +454,7 @@ class TradingEngine {
     if (this.progression.currentLevel >= this.progression.maxLevel) {
       console.log('[ENGINE] ⚠️ Max progression reached. Resetting.');
       this.progression.hardReset();
+      this.saveState();
       if (this.telegram) {
         this.telegram.send(
           `🚨 <b>Alerta — Max Progression</b>\n` +
