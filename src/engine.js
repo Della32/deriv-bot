@@ -50,7 +50,7 @@ class TradingEngine {
     // DB statements for state persistence
     if (this.db) {
       this._stmtGet = this.db.prepare('SELECT value FROM state WHERE key = ?');
-      this._stmtSet = this.db.prepare('INSERT OR REPLACE INTO state (key, value, updated_at) VALUES (?, ?, datetime("now"))');
+      this._stmtSet = this.db.prepare("INSERT OR REPLACE INTO state (key, value, updated_at) VALUES (?, ?, datetime('now'))");
 
       // Restore state from DB
       this._restoreState();

@@ -149,7 +149,7 @@ async function startBot() {
 
     // ===== Startup message dedup =====
     const stmtGet = db.prepare('SELECT value FROM state WHERE key = ?');
-    const stmtSet = db.prepare('INSERT OR REPLACE INTO state (key, value, updated_at) VALUES (?, ?, datetime("now"))');
+    const stmtSet = db.prepare("INSERT OR REPLACE INTO state (key, value, updated_at) VALUES (?, ?, datetime('now'))");
 
     const lastStartup = stmtGet.get('last_startup_ts');
     const now = Date.now();
