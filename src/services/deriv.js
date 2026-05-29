@@ -100,12 +100,12 @@ class DerivService extends EventEmitter {
         }
       });
 
-      // Timeout for initial connection only
+      // Timeout for initial connection only (30s to handle slow Render cold starts)
       setTimeout(() => {
         if (!this.authorized && this.reconnectCount === 0) {
           reject(new Error('Auth timeout'));
         }
-      }, 15000);
+      }, 30000);
     });
   }
 
