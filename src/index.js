@@ -80,6 +80,7 @@ async function startBot() {
     console.log('='.repeat(50));
 
     // Init DB
+    botStatus = 'init_db';
     const db = new Database('./data/bot.db');
     db.pragma('journal_mode = WAL');
 
@@ -104,6 +105,7 @@ async function startBot() {
     const telegram = new TelegramService(TG_TOKEN, TG_CHAT);
 
     // Init Deriv — retry connection up to 10 times
+    botStatus = 'connecting_deriv';
     const deriv = new DerivService(TOKEN, APP_ID);
     let connected = false;
     for (let attempt = 1; attempt <= 10; attempt++) {
@@ -206,8 +208,8 @@ async function startBot() {
     process.on('SIGTERM', shutdown);
 
   } catch (err) {
-    console.error('[BOT] Startup error:', err);
-    botStatus = 'error';
+    console.error('[BOT] Startup error:', err.message, err.stack);
+    botStatus = `error: ${err.message}`;
     // Don't crash! Keep HTTP alive, retry in 60s
     console.log('[BOT] Will retry startup in 60s...');
     setTimeout(startBot, 60000);
