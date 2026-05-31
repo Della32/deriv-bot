@@ -4,8 +4,8 @@
   "description": "Deriv Binary Options Bot — Reversal Strategy v6 (95.5% WR)",
   "main": "src/index.js",
   "scripts": {
-    "start": "node src/index.js",
-    "start:telegram": "node src/index.js --telegram-only",
+    "start": "node src/mult/index.js",
+    "start:old": "node src/index.js",
     "backtest": "node src/backtest.js"
   },
   "keywords": [],

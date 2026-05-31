@@ -1,1 +1,1 @@
-worker: node src/index.js --telegram-only
+worker: node src/mult/index.js

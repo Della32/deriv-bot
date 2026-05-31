@@ -15,4 +15,4 @@ RUN mkdir -p data
 
 EXPOSE 3000
 
-CMD ["node", "src/index.js"]
+CMD ["node", "src/mult/index.js"]
